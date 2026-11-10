@@ -15,7 +15,7 @@ jobs:
       - name: tools
         run: sudo apt-get install -y skopeo jq
       - name: login
-        if: ${{ secrets.DOCKER_USER != '' }}
+        continue-on-error: true
         run: echo "${{ secrets.DOCKER_PAT }}" | skopeo login docker.io -u "${{ secrets.DOCKER_USER }}" --password-stdin
       - name: prep
         run: |
