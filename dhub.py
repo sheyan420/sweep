@@ -153,7 +153,12 @@ def main():
     refs = [a for a in sys.argv[1:] if not a.startswith("--")]
     dry = "--dry" in sys.argv
     if "--file" in sys.argv:
-        refs = [r.split(chr(9))[0] + "/" + r.split(chr(9))[1] for r in open(sys.argv[sys.argv.index("--file") + 1], encoding="utf-8") if chr(9) in r]
+        refs = []
+        for _r in open(sys.argv[sys.argv.index("--file") + 1], encoding="utf-8"):
+            _r = _r.strip()
+            if not _r:
+                continue
+            refs.append(_r.split(chr(9))[0] + "/" + _r.split(chr(9))[1] if chr(9) in _r else _r)
     if not refs and os.path.exists(os.path.join(HERE, "imgrefs.tsv")):
         refs = [r.split("\t")[0] + "/" + r.split("\t")[1]
                 for r in open(os.path.join(HERE, "imgrefs.tsv"), encoding="utf-8") if "\t" in r]
