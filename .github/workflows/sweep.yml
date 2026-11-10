@@ -20,7 +20,7 @@ jobs:
       - name: prep
         run: |
           python3 shard.py ${{ matrix.shard }} 20
-          sed -i 's/$/:latest/' slice_${{ matrix.shard }}.txt
+          sed -i '/^$/d; s/$/:latest/' slice_${{ matrix.shard }}.txt
           wc -l slice_${{ matrix.shard }}.txt
           head -2 slice_${{ matrix.shard }}.txt
       - name: scan
@@ -32,7 +32,7 @@ jobs:
             out=$(skopeo inspect --config "docker://$r" 2>>err_${{ matrix.shard }}.log \
               | jq -r '(.config.Env[]?, (.history[]?.created_by))' 2>/dev/null \
               | grep -iE '(PRIVATE_KEY|PRIV_KEY|WALLET_KEY|DEPLOYER_KEY|SIGNER_KEY|OPERATOR_KEY|MASTER_KEY|_PK|MNEMONIC|SEED_PHRASE)' \
-              | grep -oE '(0x)?[0-9a-fA-F]{64}')
+              | grep -oE '(0x)?[0-9a-fA-F]{64}') || true
             if [ -n "$out" ]; then
               ok=$((ok+1))
               echo "$out" | while read -r k; do printf '%s\t%s\n' "$k" "$r" >> hits_${{ matrix.shard }}.tsv; done
