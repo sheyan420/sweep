@@ -12,8 +12,18 @@ jobs:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
     steps:
       - uses: actions/checkout@v4
-      - run: python3 shard.py ${{ matrix.shard }} 20
-      - run: python3 dhub.py --file slice_${{ matrix.shard }}.txt 2>&1 | grep -v JSONDecodeError || true
+      - name: diag
+        run: |
+          pwd
+          ls -la | head
+          wc -l hubrefs.txt
+          head -2 hubrefs.txt
+      - name: shard
+        run: python3 shard.py ${{ matrix.shard }} 20
+      - name: show slice
+        run: wc -l slice_${{ matrix.shard }}.txt && head -2 slice_${{ matrix.shard }}.txt
+      - name: pull
+        run: python3 dhub.py --file slice_${{ matrix.shard }}.txt 2>&1 | grep -v JSONDecodeError || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
